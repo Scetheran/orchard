@@ -27,6 +27,8 @@
     --ink: #262a52;          /* signs on the board */
     --error: #e0414f;
     --error-on-night: #ff9aa3;   /* the same red, light enough to read on the dark page */
+    --hint: #ffe7a0;         /* highlighter yellow behind hinted clues */
+    --hint-edge: #f0b43c;
     --font-display: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif;
     --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     --font-num: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -186,6 +188,18 @@
   .sign svg { width: 80%; height: 80%; display: block; }
   .sign.err { color: var(--error); box-shadow: 0 0 0 1.5px var(--error); }
 
+  /* Hint: the fruits and signs behind a next move, lit like a highlighter until the board changes */
+  .cell.hint, .cell.given.hint { background: var(--hint); box-shadow: inset 0 0 0 2px var(--hint-edge); animation: hint-in 0.3s ease-out; }
+  .sign.hint {
+    z-index: 1;
+    background: var(--hint);
+    box-shadow: 0 0 0 2px var(--hint-edge);
+    transform: translate(-50%, -50%) scale(1.3);
+    animation: sign-hint-in 0.3s ease-out;
+  }
+  @keyframes hint-in { from { background: var(--board); box-shadow: inset 0 0 0 2px transparent; } }
+  @keyframes sign-hint-in { from { transform: translate(-50%, -50%) scale(1); } }
+
   .board.won .cell svg { animation: hop 0.5s ease both; animation-delay: calc(var(--d) * 45ms); }
   @keyframes hop {
     0% { transform: translateY(0) scale(1); }
@@ -276,7 +290,8 @@
     .btn:hover:not(:disabled) { background: var(--night-3); }
     .btn.primary:hover:not(:disabled) { background: var(--peel-hi); }
   }
-  .controls .primary { margin-left: auto; }
+  /* Undo and Clear on the left, Hint and New puzzle on the right (New puzzle alone where there are no hints) */
+  .controls #hint, .controls #hint[hidden] + .primary { margin-left: auto; }
 
   /* The current puzzle's seed, right under the board: tap the chip to copy it */
   .seed-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: -6px; }
@@ -324,6 +339,7 @@
     font: 600 14px/1.3 var(--font-body);
     box-shadow: 0 12px 30px rgba(4, 6, 24, 0.45);
     transform: translateX(-50%);
+    pointer-events: none;   /* only a message: taps go through to the buttons underneath */
     animation: toast-in 0.18s ease-out;
   }
   @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
@@ -474,6 +490,15 @@
     .btn { padding: 10px 13px; font-size: 14px; }
     .levels span { font-size: 13px; }
   }
+  /* Phones: Undo, Clear, Hint and New puzzle still share one row */
+  @media (max-width: 440px), (orientation: landscape) and (max-height: 540px) {
+    .controls { gap: 8px; }
+    .controls .btn { padding-inline: 11px; font-size: 14px; }
+  }
+  @media (max-width: 340px) {
+    .controls { gap: 6px; }
+    .controls .btn { padding-inline: 8px; font-size: 13px; }
+  }
   /* Short screens: drop the level description so the board keeps its size */
   @media (max-height: 700px) {
     .app { max-width: min(480px, max(300px, calc(100vh - 272px))); max-width: min(480px, max(300px, calc(100svh - 272px))); }
@@ -549,7 +574,7 @@
     .tagline { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .cell.pop svg, .board.won .cell svg, .loading-fruit svg { animation: none; }
+    .cell.pop svg, .board.won .cell svg, .loading-fruit svg, .cell.hint, .sign.hint { animation: none; }
     .win { animation-duration: 0.01s; animation-delay: 0s; }
     .loading { animation-duration: 0.01s; }
     .modal[open], .toast { animation: none; }
@@ -669,6 +694,7 @@
       Undo
     </button>
     <button class="btn" id="clear" type="button">Clear</button>
+    <button class="btn" id="hint" type="button">Hint</button>
     <button class="btn primary" id="new" type="button">New puzzle</button>
   </div>
 
@@ -685,7 +711,7 @@
     <p class="seed-intro">Paste a seed someone shared to play the same starting board.</p>
     <div class="seed-row">
       <input class="seed-input" id="seed-input" name="seed" type="text" spellcheck="false" autocapitalize="characters"
-             autocorrect="off" enterkeyhint="go" placeholder="e.g. HARD-7KQ2-9XWM" aria-label="Seed" aria-describedby="seed-msg">
+             autocorrect="off" enterkeyhint="go" placeholder="e.g. C1-7KQ2-9XWM" aria-label="Seed" aria-describedby="seed-msg">
       <button class="btn" id="seed-play" type="submit" disabled>Play</button>
     </div>
     <p class="seed-msg" id="seed-msg" aria-live="polite"></p>
@@ -781,28 +807,30 @@ function seededRandom(seed) {
   };
 }
 
-// A seed names the level and the puzzle, like HARD-7KQ2-9XWM. The 8 characters use Crockford's
-// base 32, which leaves out I, L, O and U so a seed can be read aloud or retyped without mix-ups.
+// A seed names the level, the version of the puzzle maker and the puzzle, like C1-7KQ2-9XWM: a letter
+// from A (Easy) to E (Extreme), the version, then 8 characters in Crockford's base 32, which leaves out
+// I, L, O and U so a seed can be read aloud or retyped without mix-ups.
 const SEED_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const SEED_PREFIX = { easy: 'EASY', medium: 'MEDIUM', hard: 'HARD', veryhard: 'VERYHARD', extreme: 'EXTREME' };
+const SEED_LEVEL = { easy: 'A', medium: 'B', hard: 'C', veryhard: 'D', extreme: 'E' };
 function newSeed(difficulty) {
   const bytes = new Uint8Array(8);
   if (globalThis.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes);
   else bytes.forEach((_, i) => { bytes[i] = Math.floor(Math.random() * 256); });
   const code = [...bytes].map(b => SEED_ALPHABET[b % 32]).join('');
-  return `${SEED_PREFIX[difficulty]}-${code.slice(0, 4)}-${code.slice(4)}`;
+  return `${SEED_LEVEL[difficulty]}${MAKER_VERSION}-${code.slice(0, 4)}-${code.slice(4)}`;
 }
-// Reads a typed or pasted seed, forgiving about case, spaces and dashes, and reading I or L as 1 and O as 0.
-// Returns { difficulty, seed } with the seed written the standard way, or null if it isn't a seed.
+// Reads a typed or pasted seed, forgiving about case, about spaces or dashes between its three parts (or none),
+// and reading I or L as 1 and O as 0. Returns { difficulty, version, seed } with the seed written the standard
+// way, or null if it isn't a seed. The version can be one this page doesn't have yet; MAKERS says which it has.
 function parseSeed(text) {
-  const s = String(text).toUpperCase().replace(/[\s_-]/g, '');
-  for (const [difficulty, prefix] of Object.entries(SEED_PREFIX)) {
-    if (!s.startsWith(prefix)) continue;
-    const code = s.slice(prefix.length).replace(/[IL]/g, '1').replace(/O/g, '0');
-    if (code.length !== 8 || [...code].some(ch => !SEED_ALPHABET.includes(ch))) return null;
-    return { difficulty, seed: `${prefix}-${code.slice(0, 4)}-${code.slice(4)}` };
-  }
-  return null;
+  const s = String(text).trim().toUpperCase().replace(/[IL]/g, '1').replace(/O/g, '0');
+  const m = /^([A-E])(\d+)[\s_-]*([0-9A-Z]{4})[\s_-]*([0-9A-Z]{4})$/.exec(s);
+  const code = m ? m[3] + m[4] : '';
+  if (!m || [...code].some(ch => !SEED_ALPHABET.includes(ch))) return null;
+  const version = Number(m[2]);
+  if (!Number.isSafeInteger(version) || version < 1) return null;
+  const difficulty = Object.keys(SEED_LEVEL).find(d => SEED_LEVEL[d] === m[1]);
+  return { difficulty, version, seed: `${m[1]}${version}-${code.slice(0, 4)}-${code.slice(4)}` };
 }
 
 const randInt = (n, rng) => Math.floor(rng() * n);
@@ -975,7 +1003,7 @@ const DIFFICULTIES = {
   veryhard: { label: 'Very hard', technique: 2, line: [6, 99],
     note: 'The fewest clues. Again and again, the next move hides in one row or column.' },
   extreme: { label: 'Extreme', technique: 3,
-    note: 'At least once, rows and columns won’t be enough and you’ll have to follow a fruit several moves ahead.' },
+    note: 'At least once, rows and columns won’t be enough and you’ll have to follow a fruit several moves ahead. No hints.' },
 };
 
 // One try at a puzzle with exactly one solution for the chosen level: add random clues from a hidden
@@ -1023,13 +1051,19 @@ function tryPuzzle(difficulty, rng) {
   return { solution, givens, signs, difficulty, effort };
 }
 
+// The puzzle makers, by version. A seed names the version that made it, so when the way puzzles are made
+// changes, the new maker gets the next number and the old one, with everything it calls, stays as it is:
+// a seed shared today keeps making the same board.
+const MAKERS = { 1: tryPuzzle };
+const MAKER_VERSION = 1;   // the version new seeds are made with
+
 // Tries until a puzzle lands in the seed's level. A generator, so the page can pause between tries
 // and keep drawing; every pause reports how many tries it has made so far.
 function* puzzleFromSeed(seed) {
-  const { difficulty } = parseSeed(seed);
+  const { difficulty, version } = parseSeed(seed);
   const rng = seededRandom(seed);
   for (let tries = 1; ; tries++) {
-    const puzzle = tryPuzzle(difficulty, rng);
+    const puzzle = MAKERS[version](difficulty, rng);
     if (puzzle) return { ...puzzle, seed };
     yield tries;
   }
@@ -1058,13 +1092,56 @@ function findErrors(g, signs) {
 
 const isSolved = (g, signs) => !g.includes(EMPTY) && findErrors(g, signs).cells.size === 0;
 
+/* ---------- Hints: the clues behind a next move, not the move itself ---------- */
+
+// Finds a move the player can make next and returns the clues that decide it: { cells, edges }, the placed
+// fruits and the signs to look at, plus `line` (its index in LINES) when the move takes thinking a row or
+// column through. Moves seen at a glance come first. The grid must hold no mistakes.
+// Returns null when only lookahead would find the next move.
+function hintFor(g, signs) {
+  // A sign beside a placed fruit, with an empty cell on its other side
+  for (let k = 0; k < EDGES.length; k++) {
+    const { a, b } = EDGES[k];
+    if (signs[k] !== NONE && (g[a] === EMPTY) !== (g[b] === EMPTY)) return { cells: [g[a] === EMPTY ? b : a], edges: [k] };
+  }
+  for (const { cells } of LINES) {
+    // Two of a kind side by side, or with a gap between them, next to an empty cell
+    for (let k = 0; k + 2 < N; k++) {
+      const [x, y, z] = [cells[k], cells[k + 1], cells[k + 2]];
+      if (g[x] !== EMPTY && g[x] === g[y] && g[z] === EMPTY) return { cells: [x, y], edges: [] };
+      if (g[y] !== EMPTY && g[y] === g[z] && g[x] === EMPTY) return { cells: [y, z], edges: [] };
+      if (g[x] !== EMPTY && g[x] === g[z] && g[y] === EMPTY) return { cells: [x, z], edges: [] };
+    }
+    // A row or column that already has 3 of one fruit
+    for (const v of [ORANGE, BERRY]) {
+      const same = cells.filter(i => g[i] === v);
+      if (same.length === N / 2 && cells.some(i => g[i] === EMPTY)) return { cells: same, edges: [] };
+    }
+  }
+  // Thinking one row or column through: of every cell that settles, the one that needs the fewest clues
+  let best = null;
+  LINES.forEach((L, line) => {
+    const r = lineMoves(L, g, signs);
+    if (r) r.moves.forEach((v, i) => {
+      // Take away each clue in the line that the move can do without
+      const gg = g.slice(), ss = signs.slice();
+      const settled = () => lineMoves(L, gg, ss).moves.get(i) === v;
+      for (const c of L.cells) if (gg[c] !== EMPTY) { gg[c] = EMPTY; if (!settled()) gg[c] = g[c]; }
+      for (const k of L.edges) if (ss[k] !== NONE) { ss[k] = NONE; if (!settled()) ss[k] = signs[k]; }
+      const clues = { cells: L.cells.filter(c => gg[c] !== EMPTY), edges: L.edges.filter(k => ss[k] !== NONE), line };
+      if (!best || clues.cells.length + clues.edges.length < best.cells.length + best.edges.length) best = clues;
+    });
+  });
+  return best;
+}
+
 /* ---------- Game UI ---------- */
 
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), signsEl = $('signs'), winEl = $('win'), loadingEl = $('loading');
   const timerEl = $('timer'), winTimeEl = $('win-time');
-  const undoBtn = $('undo'), clearBtn = $('clear');
+  const undoBtn = $('undo'), clearBtn = $('clear'), hintBtn = $('hint');
 
   const FRUIT = {
     [ORANGE]: '<svg viewBox="0 0 100 100" aria-hidden="true"><use href="#fruit-orange"/></svg>',
@@ -1074,6 +1151,7 @@ if (typeof document !== 'undefined') {
 
   let puzzle = null, grid = new Array(N * N).fill(EMPTY), history = [], signEls = new Map(), won = false, errTimer;
   let loading = false;   // true while a new puzzle is being made; the board ignores input until it's ready
+  let hint = null;       // the clues Hint lit up, as hintFor returns them; any change to the board puts them out
   let focusIdx = 0;
 
   // The clock only runs while the page is on screen, so locking the phone or switching apps pauses it.
@@ -1095,7 +1173,7 @@ if (typeof document !== 'undefined') {
       const s = JSON.parse(localStorage.getItem(SAVE_KEY));
       const sized = (a, n) => Array.isArray(a) && a.length === n;
       const intact = s && !s.won && s.puzzle && sized(s.puzzle.givens, N * N) && sized(s.puzzle.signs, EDGES.length) && sized(s.grid, N * N);
-      // Every board shows its seed, so a game saved before seeds existed is replaced. So is one that
+      // Every board shows its seed, so a game saved without one in today's form is replaced. So is one that
       // its level's techniques can't solve (an older version made some that needed lookahead outside Extreme).
       const seeded = intact && parseSeed(s.puzzle.seed || '');
       const level = seeded && DIFFICULTIES[seeded.difficulty];
@@ -1111,6 +1189,7 @@ if (typeof document !== 'undefined') {
   function showDifficulty() {
     levelInputs.forEach(input => { input.checked = input.value === difficulty; });
     $('level-note').textContent = DIFFICULTIES[difficulty].note;
+    hintBtn.hidden = difficulty === 'extreme';   // Extreme comes without hints
   }
 
   // The seed shows under the board, on the loading screen and on the win card the moment it's picked.
@@ -1131,10 +1210,12 @@ if (typeof document !== 'undefined') {
     const parsed = text ? parseSeed(text) : null;
     const same = !!parsed && parsed.seed === currentSeed;
     const bad = !!text && !parsed;
-    seedPlay.disabled = !parsed || same;
-    seedInput.setAttribute('aria-invalid', bad ? 'true' : 'false');
-    seedMsg.classList.toggle('err', bad);
-    seedMsg.textContent = bad ? 'Seeds look like HARD-7KQ2-9XWM: a level, then 8 letters and digits.'
+    const newer = !!parsed && !MAKERS[parsed.version];
+    seedPlay.disabled = !parsed || same || newer;
+    seedInput.setAttribute('aria-invalid', bad || newer ? 'true' : 'false');
+    seedMsg.classList.toggle('err', bad || newer);
+    seedMsg.textContent = bad ? 'Seeds look like C1-7KQ2-9XWM: a level from A to E, a version, then 8 letters and digits.'
+      : newer ? 'This seed needs a newer version of Orchard. Check it for typos, or reload the page.'
       : same ? 'That’s the puzzle you’re playing now.'
       : parsed ? `Press Play to start this ${DIFFICULTIES[parsed.difficulty].label} puzzle.`
       : 'Paste a seed someone shared to play the same starting board.';
@@ -1161,6 +1242,7 @@ if (typeof document !== 'undefined') {
     grid = state.grid || puzzle.givens.slice();
     history = Array.isArray(state.history) ? state.history : [];
     won = false;
+    hint = null;
     elapsedMs = Number(state.elapsed) || 0;
     runningSince = null;
     resumeClock();
@@ -1242,9 +1324,12 @@ if (typeof document !== 'undefined') {
         el.innerHTML = FRUIT[v] || '';
         el.dataset.v = v;
       }
+      const hinted = !!hint && hint.cells.includes(i);
+      el.classList.toggle('hint', hinted);
       const r = Math.floor(i / N) + 1, c = (i % N) + 1;
-      el.setAttribute('aria-label', `Row ${r}, column ${c}: ${NAME[v]}${given ? ', fixed' : ''}`);
+      el.setAttribute('aria-label', `Row ${r}, column ${c}: ${NAME[v]}${given ? ', fixed' : ''}${hinted ? ', hinted' : ''}`);
     });
+    signEls.forEach((el, k) => el.classList.toggle('hint', !!hint && hint.edges.includes(k)));
     popped.forEach(i => {
       const el = cellEls[i];
       if (grid[i] === EMPTY) return;
@@ -1254,6 +1339,7 @@ if (typeof document !== 'undefined') {
     });
     undoBtn.disabled = loading || won || history.length === 0;
     clearBtn.disabled = loading || won || grid.every((v, i) => v === puzzle.givens[i]);
+    hintBtn.disabled = loading || won;
   }
 
   // Resolved errors clear at once; new ones show after a short pause so cycling through a cell doesn't flash red.
@@ -1270,6 +1356,7 @@ if (typeof document !== 'undefined') {
   }
 
   function changed(popped) {
+    hint = null;
     render(popped);
     refreshErrors();
     if (isSolved(grid, puzzle.signs)) win();
@@ -1295,6 +1382,21 @@ if (typeof document !== 'undefined') {
     history.push(grid.slice());
     grid = puzzle.givens.slice();
     changed([]);
+  }
+
+  // Lights up the clues behind a next move. A board with a wrong fruit on it has no honest next move,
+  // so then it only says so, without saying where.
+  function showHint() {
+    if (loading || won || !puzzle || puzzle.difficulty === 'extreme') return;
+    if (grid.some((v, i) => v !== EMPTY && v !== puzzle.solution[i])) {
+      toast('One of your fruits is in the wrong spot. Undo a few moves, then try Hint again.', 4000);
+      return;
+    }
+    hint = hintFor(grid, puzzle.signs);
+    render();
+    if (!hint) return;
+    const where = hint.line === undefined ? '' : hint.line < N ? `row ${hint.line + 1}` : `column ${hint.line - N + 1}`;
+    toast(where ? `Think ${where} through: the highlighted clues decide a cell in it.` : 'The highlighted clues decide your next move.', 4000);
   }
 
   const fmt = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -1391,7 +1493,7 @@ if (typeof document !== 'undefined') {
   $('seed-form').addEventListener('submit', ev => {
     ev.preventDefault();
     const parsed = parseSeed(seedInput.value);
-    if (!parsed || parsed.seed === currentSeed) return;
+    if (!parsed || parsed.seed === currentSeed || !MAKERS[parsed.version]) return;
     seedInput.value = '';
     closeModal($('seed-dialog'));
     newGame(parsed.seed);
@@ -1399,11 +1501,11 @@ if (typeof document !== 'undefined') {
 
   const toastEl = $('toast');
   let toastTimer;
-  function toast(text) {
+  function toast(text, ms = 2200) {
     toastEl.textContent = text;
     toastEl.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2200);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, ms);
   }
   // Where the clipboard API is refused, the older copy command usually still works.
   function copyWithCommand(text) {
@@ -1429,6 +1531,7 @@ if (typeof document !== 'undefined') {
 
   undoBtn.addEventListener('click', undo);
   clearBtn.addEventListener('click', clearBoard);
+  hintBtn.addEventListener('click', showHint);
   $('new').addEventListener('click', () => newGame());
   $('again').addEventListener('click', () => { newGame(); cellEls[focusIdx].focus({ preventScroll: true }); });
 
