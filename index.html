@@ -1,0 +1,1443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d2147">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Orchard">
+<meta name="format-detection" content="telephone=no">
+<title>Orchard</title>
+<style>
+  /* Layout: one centred column — name, timer and ? button, the white board as the hero, then controls; rules open in a modal */
+  :root {
+    --night: #1d2147;        /* page: blueberry dusk */
+    --night-2: #282d5e;      /* raised surfaces on the page */
+    --night-3: #343a74;      /* hover on raised surfaces */
+    --ink-on-night: #eef0ff;
+    --muted-on-night: #a6acd6;
+    --peel: #f5891f;         /* accent: orange peel */
+    --peel-hi: #ff9d3a;
+    --board: #ffffff;
+    --board-hover: #f6f7fb;
+    --given: #e8eaf1;        /* fixed cells: a shade darker than the board */
+    --line: #d6d9e4;
+    --ink: #262a52;          /* signs on the board */
+    --error: #e0414f;
+    --error-on-night: #ff9aa3;   /* the same red, light enough to read on the dark page */
+    --font-display: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-num: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  html, body { min-height: 100%; overscroll-behavior-y: none; }   /* no pull-to-refresh mid-game */
+  body {
+    margin: 0;
+    background: radial-gradient(900px 520px at 50% -12%, #2e3576 0%, rgba(46, 53, 118, 0) 65%), var(--night);
+    background-color: var(--night);
+    color: var(--ink-on-night);
+    font: 15px/1.5 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    /* Narrows on short screens so the board and its buttons fit without scrolling */
+    max-width: 480px;
+    max-width: min(480px, max(300px, calc(100vh - 292px)));
+    max-width: min(480px, max(300px, calc(100svh - 292px)));
+    margin: 0 auto;
+    padding-block: max(28px, env(safe-area-inset-top, 0px)) max(40px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .mark { position: relative; width: 44px; height: 40px; flex: none; }
+  .mark svg { position: absolute; }
+  .mark .m-orange { width: 34px; height: 34px; left: 0; top: 0; }
+  .mark .m-berry { width: 26px; height: 26px; right: 0; bottom: 0; }
+  h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .tagline { margin: 4px 0 0; color: var(--muted-on-night); font-size: 13px; }
+  .timer {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-size: 17px;
+    color: var(--ink-on-night);
+    background: var(--night-2);
+    padding: 6px 12px;
+    border-radius: 10px;
+    flex: none;
+  }
+
+  .picker { display: grid; gap: 8px; margin-top: -4px; }
+  .levels {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--night-2);
+  }
+  .levels label { position: relative; display: block; }
+  .levels input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .levels span {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    min-height: 36px;
+    padding: 4px 3px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.15;
+    text-align: center;   /* "Very hard" may wrap onto two lines on a narrow phone */
+    color: var(--muted-on-night);
+  }
+  .levels input:checked + span { background: var(--board); color: var(--ink); }
+  .levels input:focus-visible + span { outline: 2px solid var(--peel); outline-offset: 1px; }
+  @media (hover: hover) { .levels input:not(:checked):hover + span { background: var(--night-3); color: var(--ink-on-night); } }
+  .levels label, .levels input { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+  .level-note { margin: 0; min-height: 1.5em; font-size: 13px; color: var(--muted-on-night); }
+
+  .board-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    max-width: 100%;
+    border-radius: 16px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5), 0 22px 48px rgba(6, 8, 30, 0.5);
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(6, 1fr);
+    gap: 1px;
+    width: 100%;
+    height: 100%;
+    background: var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .cell {
+    appearance: none;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    display: grid;
+    place-items: center;
+    background: var(--board);
+    color: inherit;
+    cursor: pointer;
+  }
+  /* Taps act at once: no double-tap zoom, no grey flash, no text selection or long-press menu */
+  .cell, .btn {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  @media (hover: hover) { .cell:hover { background: var(--board-hover); } }
+  .cell:active { background: var(--board-hover); }
+  .cell.given, .cell.given:hover, .cell.given:active { background: var(--given); cursor: default; }
+  .cell:focus-visible { outline: 3px solid var(--peel); outline-offset: -3px; z-index: 1; }
+  .cell svg { width: 72%; height: 72%; display: block; }
+  .cell.pop svg { animation: pop 0.18s ease-out; }
+  .cell.err::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(135deg, rgba(224, 65, 79, 0.24) 0 5px, rgba(224, 65, 79, 0) 5px 11px);
+  }
+  @keyframes pop { from { transform: scale(0.55); } to { transform: scale(1); } }
+
+  .signs { position: absolute; inset: 0; pointer-events: none; }
+  .sign {
+    position: absolute;
+    width: 6.2%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    display: grid;
+    place-items: center;
+    background: var(--board);
+    color: var(--ink);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .sign svg { width: 80%; height: 80%; display: block; }
+  .sign.err { color: var(--error); box-shadow: 0 0 0 1.5px var(--error); }
+
+  .board.won .cell svg { animation: hop 0.5s ease both; animation-delay: calc(var(--d) * 45ms); }
+  @keyframes hop {
+    0% { transform: translateY(0) scale(1); }
+    40% { transform: translateY(-14%) scale(1.08); }
+    100% { transform: translateY(0) scale(1); }
+  }
+
+  .win {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.55);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    animation: fade 0.35s ease-out 0.75s both;
+  }
+  .win-card {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 24px 28px 22px;
+    border-radius: 16px;
+    background: var(--night);
+    color: var(--ink-on-night);
+    text-align: center;
+    box-shadow: 0 18px 40px rgba(6, 8, 30, 0.45);
+  }
+  /* Fades in only once making a puzzle takes longer than a blink, so quick levels never flash it */
+  .loading {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.7);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    animation: fade 0.25s ease-out 0.15s both;
+  }
+  .loading-card {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 22px 26px 18px;
+    border-radius: 16px;
+    background: var(--night);
+    color: var(--ink-on-night);
+    text-align: center;
+    box-shadow: 0 18px 40px rgba(6, 8, 30, 0.45);
+  }
+  .loading-fruit { display: flex; gap: 6px; height: 42px; align-items: flex-end; margin-bottom: 6px; }
+  .loading-fruit svg { width: 30px; height: 30px; animation: bob 0.9s ease-in-out infinite; }
+  .loading-fruit svg:nth-child(2) { animation-delay: 0.15s; }
+  .loading-fruit svg:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bob { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-12px); } }
+  .loading-title { margin: 0; font-family: var(--font-display); font-size: 18px; font-weight: 800; }
+  .loading-tries { margin: 0; min-height: 1.5em; font-size: 13px; color: var(--muted-on-night); font-variant-numeric: tabular-nums; }
+
+  .win-card h2 { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 800; line-height: 1.1; }
+  .win-card p { margin: 0 0 10px; color: var(--muted-on-night); font-variant-numeric: tabular-nums; }
+  @keyframes fade { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 11px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--night-2);
+    color: var(--ink-on-night);
+    font: 600 15px/1 var(--font-body);
+    cursor: pointer;
+  }
+  .btn:disabled { opacity: 0.42; cursor: default; }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
+  .btn:focus-visible { outline: 2px solid var(--peel); outline-offset: 2px; }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn.primary { background: var(--peel); border-color: transparent; color: #2b1300; }
+  @media (hover: hover) {
+    .btn:hover:not(:disabled) { background: var(--night-3); }
+    .btn.primary:hover:not(:disabled) { background: var(--peel-hi); }
+  }
+  .controls .primary { margin-left: auto; }
+
+  /* The current puzzle's seed, right under the board: tap the chip to copy it */
+  .seed-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: -6px; }
+  .seed-label {
+    flex: none;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted-on-night);
+  }
+  .seed-chip, .small-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 11px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9px;
+    background: var(--night-2);
+    color: var(--ink-on-night);
+    white-space: nowrap;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .seed-chip { min-width: 0; font: 600 15px/1 var(--font-num); letter-spacing: 0.03em; }
+  .seed-chip svg { width: 15px; height: 15px; flex: none; color: var(--muted-on-night); }
+  .small-btn { flex: none; margin-left: auto; font: 600 13px/1 var(--font-body); }
+  .seed-chip:focus-visible, .small-btn:focus-visible { outline: 2px solid var(--peel); outline-offset: 2px; }
+  @media (hover: hover) { .seed-chip:hover, .small-btn:hover { background: var(--night-3); } }
+  .card-seed { margin: 0; font: 600 13px/1.4 var(--font-num); letter-spacing: 0.03em; color: var(--ink-on-night); }
+
+  /* Short messages ("Seed copied") float above the bottom edge for a moment */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    z-index: 5;
+    max-width: calc(100vw - 32px);
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--board);
+    color: var(--ink);
+    font: 600 14px/1.3 var(--font-body);
+    box-shadow: 0 12px 30px rgba(4, 6, 24, 0.45);
+    transform: translateX(-50%);
+    animation: toast-in 0.18s ease-out;
+  }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+  /* Modals: How to play, and Play a seed */
+  .top-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+  .help-btn {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    background: var(--night-2);
+    color: var(--ink-on-night);
+    font: 800 19px/1 var(--font-display);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (hover: hover) { .help-btn:hover { background: var(--night-3); border-color: rgba(255, 255, 255, 0.6); } }
+  .help-btn:focus-visible { outline: 2px solid var(--peel); outline-offset: 2px; }
+
+  .modal {
+    width: min(440px, calc(100vw - 32px));
+    max-width: none;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    padding: 0;   /* the padding lives on .modal-body, so a click on the dialog itself means the backdrop */
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    background: var(--night);
+    color: var(--ink-on-night);
+    box-shadow: 0 24px 60px rgba(4, 6, 24, 0.6);
+  }
+  .modal[open] { animation: fade 0.2s ease-out; }
+  .modal::backdrop { background: rgba(10, 12, 34, 0.62); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  html:has(.modal[open]) { overflow: hidden; }
+  .modal-body { margin: 0; padding: 18px 22px 20px; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .modal h2 { margin: 0; font-family: var(--font-display); font-size: 24px; font-weight: 800; line-height: 1.1; }
+  .modal-close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    margin-right: -8px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted-on-night);
+    cursor: pointer;
+  }
+  .modal-close svg { width: 20px; height: 20px; }
+  @media (hover: hover) { .modal-close:hover { background: var(--night-2); color: var(--ink-on-night); } }
+  .modal-close:focus-visible { outline: 2px solid var(--peel); outline-offset: 0; }
+
+  .seed-intro { margin: 0 0 12px; font-size: 14px; color: var(--muted-on-night); }
+  .seed-row { display: flex; gap: 8px; }
+  .seed-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    background: var(--night-2);
+    color: var(--ink-on-night);
+    font: 600 16px/1 var(--font-num);   /* 16px keeps iPhones from zooming in on focus */
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  .seed-input::placeholder { color: var(--muted-on-night); opacity: 0.75; text-transform: none; letter-spacing: 0; }
+  .seed-input:focus-visible { outline: 2px solid var(--peel); outline-offset: 1px; }
+  .seed-input[aria-invalid="true"] { border-color: var(--error); }
+  #seed-play:not(:disabled) { background: var(--peel); border-color: transparent; color: #2b1300; }
+  .seed-msg { margin: 10px 0 0; min-height: 1.4em; font-size: 13px; color: var(--muted-on-night); }
+  .seed-msg.err { color: var(--error-on-night); }
+
+  .help-done { width: 100%; justify-content: center; margin-top: 18px; }
+  .levels-more { margin-top: 16px; }
+  .levels-more summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted-on-night);
+  }
+  .levels-more summary::-webkit-details-marker { display: none; }
+  .levels-more summary::after { content: "▸"; font-size: 11px; transition: transform 0.15s; }
+  .levels-more[open] summary::after { transform: rotate(90deg); }
+  .levels-more summary:focus-visible { outline: 2px solid var(--peel); outline-offset: 2px; border-radius: 4px; }
+  .level-list { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 6px 0 0; font-size: 14px; }
+  .level-list dt { font-weight: 700; white-space: nowrap; }
+  .level-list dd { margin: 0; color: var(--muted-on-night); }
+  .help ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+  .help li { position: relative; padding-left: 16px; }
+  .help li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.62em;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--peel);
+  }
+  .ico { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; }
+  .chip {
+    display: inline-grid;
+    place-items: center;
+    width: 1.35em;
+    height: 1.35em;
+    vertical-align: -0.3em;
+    border-radius: 50%;
+    background: var(--board);
+    color: var(--ink);
+  }
+  .chip svg { width: 80%; height: 80%; }
+  .keys { margin: 14px 0 0; font-size: 12.5px; color: var(--muted-on-night); }
+  kbd {
+    font-family: var(--font-num);
+    font-size: 11.5px;
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: var(--night-2);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .touch-only { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .touch-only { display: inline; }
+    .mouse-only, .keys { display: none; }
+  }
+
+  @media (max-width: 380px) {
+    h1 { font-size: 28px; }
+    .btn { padding: 10px 13px; font-size: 14px; }
+    .levels span { font-size: 13px; }
+  }
+  /* Short screens: drop the level description so the board keeps its size */
+  @media (max-height: 700px) {
+    .app { max-width: min(480px, max(300px, calc(100vh - 272px))); max-width: min(480px, max(300px, calc(100svh - 272px))); }
+    .level-note { display: none; }
+  }
+
+  /* Phones held upright: the whole game is one screen tall, nothing to scroll. Everything else keeps
+     its size and the board takes the height that's left, as a square that fits both ways. */
+  @media (max-width: 600px) and (orientation: portrait) {
+    .app {
+      max-width: none;
+      height: 100vh;
+      height: 100svh;
+      justify-content: center;   /* on a tall phone the spare room splits above and below, not inside the board area */
+      gap: 10px;
+      padding-block: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-bottom, 0px));
+    }
+    .board-area {
+      flex: 1 1 0;
+      min-height: 0;
+      max-height: calc(100vw - 32px);   /* never taller than the board can be wide */
+      display: grid;
+      place-items: center;
+      container-type: size;
+    }
+    .board-wrap { width: min(100cqw, 100cqh); }
+    .tagline, .level-note, .seed-label { display: none; }
+    .picker, .seed-line { margin-top: 0; }
+    .mark { width: 38px; height: 34px; }
+    .mark .m-orange { width: 29px; height: 29px; }
+    .mark .m-berry { width: 22px; height: 22px; }
+    h1 { font-size: 28px; }
+    .timer { padding: 6px 10px; font-size: 16px; }
+    .seed-chip { font-size: 14px; }
+    .help-body { padding: 16px 18px 18px; font-size: 14px; }
+    .help ul { gap: 7px; }
+    .levels-more { margin-top: 12px; }
+  }
+  /* Tall phones have room to spare, so the tagline and the level description come back */
+  @media (max-width: 600px) and (orientation: portrait) and (min-height: 720px) {
+    .tagline, .level-note { display: block; }
+  }
+  @media (max-width: 360px) {
+    .seed-chip { font-size: 13px; letter-spacing: 0; }
+  }
+
+  /* Phone on its side: board on the left at full height, everything else in a column beside it */
+  @media (orientation: landscape) and (max-height: 540px) {
+    .app {
+      max-width: none;
+      display: grid;
+      grid-template-columns: auto minmax(0, 340px);
+      grid-template-rows: auto auto auto 1fr;
+      grid-template-areas: "board top" "board picker" "board line" "board controls";
+      justify-content: center;
+      align-items: start;
+      column-gap: 28px;
+      row-gap: 14px;
+      padding-block: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-bottom, 0px));
+    }
+    .top { grid-area: top; }
+    .picker { grid-area: picker; margin-top: 0; }
+    .controls { grid-area: controls; }
+    .seed-line { grid-area: line; margin-top: 0; }
+    .seed-label { display: none; }
+    .seed-chip { font-size: 14px; }
+    .board-area { grid-area: board; }
+    .board-wrap {
+      width: max(240px, calc(100vh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+      width: max(240px, calc(100svh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    }
+    h1 { font-size: 28px; }
+    .tagline { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cell.pop svg, .board.won .cell svg, .loading-fruit svg { animation: none; }
+    .win { animation-duration: 0.01s; animation-delay: 0s; }
+    .loading { animation-duration: 0.01s; }
+    .modal[open], .toast { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <radialGradient id="g-orange" cx="36%" cy="34%" r="72%">
+      <stop offset="0" stop-color="#ffc66e"/>
+      <stop offset="0.45" stop-color="#f7911c"/>
+      <stop offset="1" stop-color="#dc6200"/>
+    </radialGradient>
+    <radialGradient id="g-berry" cx="36%" cy="32%" r="74%">
+      <stop offset="0" stop-color="#8f9ce8"/>
+      <stop offset="0.42" stop-color="#4b5cc2"/>
+      <stop offset="1" stop-color="#232c74"/>
+    </radialGradient>
+    <symbol id="fruit-orange" viewBox="0 0 100 100">
+      <circle cx="50" cy="55" r="38" fill="url(#g-orange)"/>
+      <g fill="#c25500" opacity="0.28">
+        <circle cx="64" cy="44" r="1.3"/><circle cx="71" cy="58" r="1.3"/><circle cx="58" cy="70" r="1.3"/>
+        <circle cx="42" cy="78" r="1.3"/><circle cx="30" cy="62" r="1.3"/><circle cx="76" cy="70" r="1.3"/>
+        <circle cx="50" cy="60" r="1.3"/><circle cx="66" cy="82" r="1.3"/><circle cx="24" cy="48" r="1.3"/>
+      </g>
+      <ellipse cx="37" cy="41" rx="9" ry="5.5" fill="#fff" opacity="0.38" transform="rotate(-32 37 41)"/>
+      <circle cx="50" cy="18" r="3.2" fill="#6d4a1d"/>
+      <path d="M51 17.5 C 57 6.5, 71 5.5, 79 9.5 C 73 18.5, 60 21.5, 51 17.5 Z" fill="#3f9a3c"/>
+      <path d="M53 16.8 C 61 13.4, 69 11.2, 76.5 10.4" stroke="#2b7a2c" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="fruit-berry" viewBox="0 0 100 100">
+      <circle cx="50" cy="54" r="34" fill="url(#g-berry)"/>
+      <ellipse cx="50" cy="31.5" rx="12.5" ry="9.5" fill="#2a3381" opacity="0.75"/>
+      <path d="M50 23 L52.35 28.76 L58.56 29.22 L53.8 33.24 L55.29 39.28 L50 36 L44.71 39.28 L46.2 33.24 L41.44 29.22 L47.65 28.76 Z"
+            fill="#171c50" stroke="#171c50" stroke-width="1.6" stroke-linejoin="round"/>
+      <ellipse cx="36" cy="47" rx="7.5" ry="4.5" fill="#fff" opacity="0.32" transform="rotate(-35 36 47)"/>
+    </symbol>
+    <symbol id="sign-same" viewBox="0 0 20 20">
+      <path d="M5.5 7.8 H14.5 M5.5 12.2 H14.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    </symbol>
+    <symbol id="sign-diff" viewBox="0 0 20 20">
+      <path d="M6.3 6.3 L13.7 13.7 M13.7 6.3 L6.3 13.7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    </symbol>
+  </defs>
+</svg>
+
+<main class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg class="m-orange" viewBox="0 0 100 100"><use href="#fruit-orange"/></svg>
+        <svg class="m-berry" viewBox="0 0 100 100"><use href="#fruit-berry"/></svg>
+      </div>
+      <div>
+        <h1>Orchard</h1>
+        <p class="tagline">Pack the crate: oranges and blueberries.</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="timer" id="timer" aria-label="Time">0:00</div>
+      <button class="help-btn" id="help-open" type="button" aria-label="How to play" aria-haspopup="dialog" aria-controls="help">?</button>
+    </div>
+  </header>
+
+  <div class="picker">
+    <div class="levels" role="radiogroup" aria-label="Difficulty" aria-describedby="level-note">
+      <label><input type="radio" name="level" id="level-easy" value="easy"><span>Easy</span></label>
+      <label><input type="radio" name="level" id="level-medium" value="medium"><span>Medium</span></label>
+      <label><input type="radio" name="level" id="level-hard" value="hard"><span>Hard</span></label>
+      <label><input type="radio" name="level" id="level-veryhard" value="veryhard"><span>Very hard</span></label>
+      <label><input type="radio" name="level" id="level-extreme" value="extreme"><span>Extreme</span></label>
+    </div>
+    <p class="level-note" id="level-note"></p>
+  </div>
+
+  <div class="board-area">
+  <div class="board-wrap">
+    <div class="board" id="board" role="group" aria-label="Puzzle board, 6 by 6"></div>
+    <div class="signs" id="signs" aria-hidden="true"></div>
+    <div class="win" id="win" hidden>
+      <div class="win-card" role="status">
+        <h2>Solved!</h2>
+        <p id="win-time"></p>
+        <p class="card-seed" id="win-seed"></p>
+        <button class="btn primary" id="again" type="button">Play another</button>
+      </div>
+    </div>
+    <div class="loading" id="loading" hidden>
+      <div class="loading-card" role="status" aria-live="polite">
+        <div class="loading-fruit" aria-hidden="true">
+          <svg viewBox="0 0 100 100"><use href="#fruit-orange"/></svg>
+          <svg viewBox="0 0 100 100"><use href="#fruit-berry"/></svg>
+          <svg viewBox="0 0 100 100"><use href="#fruit-orange"/></svg>
+        </div>
+        <p class="loading-title" id="loading-title">Making your puzzle…</p>
+        <p class="card-seed" id="loading-seed"></p>
+        <p class="loading-tries" id="loading-tries"></p>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="seed-line">
+    <span class="seed-label" aria-hidden="true">Seed</span>
+    <button class="seed-chip" id="seed-copy" type="button" aria-label="Copy seed">
+      <span id="seed-value"></span>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 3.2 V3 a1.5 1.5 0 0 0 -1.5 -1.5 H4 A1.5 1.5 0 0 0 2.5 3 v5 A1.5 1.5 0 0 0 4 9.5 h0.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+    <button class="small-btn" id="seed-open" type="button" aria-haspopup="dialog" aria-controls="seed-dialog">Enter seed</button>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="undo" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 L2.5 7 L6 10.5 M3 7 H10 A3.5 3.5 0 0 1 10 14 H8" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Undo
+    </button>
+    <button class="btn" id="clear" type="button">Clear</button>
+    <button class="btn primary" id="new" type="button">New puzzle</button>
+  </div>
+
+</main>
+
+<dialog class="modal" id="seed-dialog" aria-labelledby="seed-title">
+  <form class="modal-body" id="seed-form" autocomplete="off" novalidate>
+    <div class="modal-head">
+      <h2 id="seed-title">Play a seed</h2>
+      <button class="modal-close" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5 L14.5 14.5 M14.5 5.5 L5.5 14.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+    </div>
+    <p class="seed-intro">Paste a seed someone shared to play the same starting board.</p>
+    <div class="seed-row">
+      <input class="seed-input" id="seed-input" name="seed" type="text" spellcheck="false" autocapitalize="characters"
+             autocorrect="off" enterkeyhint="go" placeholder="e.g. HARD-7KQ2-9XWM" aria-label="Seed" aria-describedby="seed-msg">
+      <button class="btn" id="seed-play" type="submit" disabled>Play</button>
+    </div>
+    <p class="seed-msg" id="seed-msg" aria-live="polite"></p>
+  </form>
+</dialog>
+
+<dialog class="modal help" id="help" aria-labelledby="help-title">
+  <div class="modal-body help-body">
+    <div class="modal-head">
+      <h2 id="help-title">How to play</h2>
+      <button class="modal-close" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5 L14.5 14.5 M14.5 5.5 L5.5 14.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+    </div>
+    <ul>
+      <li>Fill every cell with an <svg class="ico" viewBox="0 0 100 100" role="img" aria-label="orange"><use href="#fruit-orange"/></svg> or a <svg class="ico" viewBox="0 0 100 100" role="img" aria-label="blueberry"><use href="#fruit-berry"/></svg>.</li>
+      <li>Every row and column holds 3 of each fruit.</li>
+      <li>No more than 2 of the same fruit next to each other, across or down.</li>
+      <li><span class="chip" role="img" aria-label="equals sign"><svg viewBox="0 0 20 20"><use href="#sign-same"/></svg></span> joins cells with the same fruit. <span class="chip" role="img" aria-label="cross sign"><svg viewBox="0 0 20 20"><use href="#sign-diff"/></svg></span> joins cells with different fruit.</li>
+      <li><span class="mouse-only">Click</span><span class="touch-only">Tap</span> a cell to cycle: orange, blueberry, empty. Shaded cells are fixed.</li>
+    </ul>
+    <details class="levels-more" id="levels-more">
+      <summary>Levels</summary>
+      <dl class="level-list" id="level-list"></dl>
+    </details>
+    <p class="keys"><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp;·&nbsp; <kbd>O</kbd> orange &nbsp;·&nbsp; <kbd>B</kbd> blueberry &nbsp;·&nbsp; <kbd>Del</kbd> clear &nbsp;·&nbsp; <kbd id="undo-key">Ctrl Z</kbd> undo</p>
+    <button class="btn primary help-done" type="button" data-close>Got it</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+'use strict';
+
+/* ---------- Puzzle logic (no DOM) ---------- */
+
+const N = 6;
+const EMPTY = 0, ORANGE = 1, BERRY = 2;
+const NONE = 0, SAME = 1, DIFF = 2;
+
+// Every border between two neighbouring cells. 'h' edges sit between columns, 'v' edges between rows.
+const EDGES = [];
+for (let r = 0; r < N; r++) for (let c = 0; c < N - 1; c++) EDGES.push({ a: r * N + c, b: r * N + c + 1, dir: 'h', r, c });
+for (let r = 0; r < N - 1; r++) for (let c = 0; c < N; c++) EDGES.push({ a: r * N + c, b: (r + 1) * N + c, dir: 'v', r, c });
+const EDGE_AT = new Map(EDGES.map((e, k) => [e.a + ':' + e.b, k]));
+
+// Rows and columns, each with the edges between its consecutive cells.
+const LINES = [];
+for (let r = 0; r < N; r++) LINES.push(lineOf(Array.from({ length: N }, (_, c) => r * N + c)));
+for (let c = 0; c < N; c++) LINES.push(lineOf(Array.from({ length: N }, (_, r) => r * N + c)));
+function lineOf(cells) {
+  return { cells, edges: cells.slice(1).map((b, k) => EDGE_AT.get(cells[k] + ':' + b)) };
+}
+
+// Every legal row/column: 3 of each fruit, never 3 in a row.
+const PATTERNS = [];
+for (let m = 0; m < 1 << N; m++) {
+  const p = Array.from({ length: N }, (_, k) => (m >> k) & 1 ? BERRY : ORANGE);
+  if (p.filter(v => v === ORANGE).length !== N / 2) continue;
+  let ok = true;
+  for (let k = 0; k + 2 < N; k++) if (p[k] === p[k + 1] && p[k] === p[k + 2]) ok = false;
+  if (ok) PATTERNS.push(p);
+}
+
+/* ---------- Seeds: the same seed always makes the same puzzle ---------- */
+
+// Turns a seed into a stream of random numbers that is identical in every browser
+// (cyrb128 to spread the seed into 128 bits, sfc32 to generate from them).
+function seededRandom(seed) {
+  let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
+  for (let i = 0; i < seed.length; i++) {
+    const k = seed.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  h1 ^= h2 ^ h3 ^ h4; h2 ^= h1; h3 ^= h1; h4 ^= h1;
+  let a = h1 >>> 0, b = h2 >>> 0, c = h3 >>> 0, d = h4 >>> 0;
+  return () => {
+    const t = (((a + b) | 0) + d) | 0;
+    d = (d + 1) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+
+// A seed names the level and the puzzle, like HARD-7KQ2-9XWM. The 8 characters use Crockford's
+// base 32, which leaves out I, L, O and U so a seed can be read aloud or retyped without mix-ups.
+const SEED_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const SEED_PREFIX = { easy: 'EASY', medium: 'MEDIUM', hard: 'HARD', veryhard: 'VERYHARD', extreme: 'EXTREME' };
+function newSeed(difficulty) {
+  const bytes = new Uint8Array(8);
+  if (globalThis.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else bytes.forEach((_, i) => { bytes[i] = Math.floor(Math.random() * 256); });
+  const code = [...bytes].map(b => SEED_ALPHABET[b % 32]).join('');
+  return `${SEED_PREFIX[difficulty]}-${code.slice(0, 4)}-${code.slice(4)}`;
+}
+// Reads a typed or pasted seed, forgiving about case, spaces and dashes, and reading I or L as 1 and O as 0.
+// Returns { difficulty, seed } with the seed written the standard way, or null if it isn't a seed.
+function parseSeed(text) {
+  const s = String(text).toUpperCase().replace(/[\s_-]/g, '');
+  for (const [difficulty, prefix] of Object.entries(SEED_PREFIX)) {
+    if (!s.startsWith(prefix)) continue;
+    const code = s.slice(prefix.length).replace(/[IL]/g, '1').replace(/O/g, '0');
+    if (code.length !== 8 || [...code].some(ch => !SEED_ALPHABET.includes(ch))) return null;
+    return { difficulty, seed: `${prefix}-${code.slice(0, 4)}-${code.slice(4)}` };
+  }
+  return null;
+}
+
+const randInt = (n, rng) => Math.floor(rng() * n);
+function shuffle(a, rng) {
+  for (let i = a.length - 1; i > 0; i--) { const j = randInt(i + 1, rng); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function randomSolution(rng) {
+  const g = new Array(N * N).fill(EMPTY);
+  const fits = (i, v) => {
+    const r = Math.floor(i / N), c = i % N;
+    let inRow = 0, inCol = 0;
+    for (let k = 0; k < c; k++) if (g[r * N + k] === v) inRow++;
+    for (let k = 0; k < r; k++) if (g[k * N + c] === v) inCol++;
+    if (inRow >= N / 2 || inCol >= N / 2) return false;
+    if (c >= 2 && g[i - 1] === v && g[i - 2] === v) return false;
+    if (r >= 2 && g[i - N] === v && g[i - 2 * N] === v) return false;
+    return true;
+  };
+  const fill = i => {
+    if (i === N * N) return true;
+    for (const v of shuffle([ORANGE, BERRY], rng)) {
+      if (!fits(i, v)) continue;
+      g[i] = v;
+      if (fill(i + 1)) return true;
+      g[i] = EMPTY;
+    }
+    return false;
+  };
+  fill(0);
+  return g;
+}
+
+const other = v => (v === ORANGE ? BERRY : ORANGE);
+
+/* ---------- How a person solves it: three techniques, easiest first ---------- */
+
+// 1 · Basic: what you see at a glance. A sign next to a placed fruit, two of a kind side by side,
+//     a gap between two of a kind, a row or column that already has 3 of one fruit.
+function basicMoves(g, signs) {
+  const moves = new Map();
+  EDGES.forEach((e, k) => {
+    const s = signs[k], a = g[e.a], b = g[e.b];
+    if (s === NONE || (a === EMPTY) === (b === EMPTY)) return;
+    if (a !== EMPTY) moves.set(e.b, s === SAME ? a : other(a));
+    else moves.set(e.a, s === SAME ? b : other(b));
+  });
+  for (const { cells } of LINES) {
+    for (let k = 0; k + 2 < N; k++) {
+      const [x, y, z] = [g[cells[k]], g[cells[k + 1]], g[cells[k + 2]]];
+      if (x !== EMPTY && x === y && z === EMPTY) moves.set(cells[k + 2], other(x));
+      if (y !== EMPTY && y === z && x === EMPTY) moves.set(cells[k], other(y));
+      if (x !== EMPTY && x === z && y === EMPTY) moves.set(cells[k + 1], other(x));
+    }
+    for (const v of [ORANGE, BERRY]) {
+      if (cells.filter(i => g[i] === v).length !== N / 2) continue;
+      for (const i of cells) if (g[i] === EMPTY) moves.set(i, other(v));
+    }
+  }
+  return moves;
+}
+
+// 2 · Line reasoning: thinking one whole row or column through. A cell is forced when every
+//     legal way to finish that line puts the same fruit there.
+//     Returns null when no legal way is left, meaning the grid contradicts itself.
+function lineMoves(L, g, signs) {
+  let agree = null, ways = 0;
+  for (const p of PATTERNS) {
+    let ok = true;
+    for (let k = 0; k < N && ok; k++) { const v = g[L.cells[k]]; if (v !== EMPTY && v !== p[k]) ok = false; }
+    for (let k = 0; k < N - 1 && ok; k++) {
+      const s = signs[L.edges[k]];
+      if ((s === SAME && p[k] !== p[k + 1]) || (s === DIFF && p[k] === p[k + 1])) ok = false;
+    }
+    if (!ok) continue;
+    ways++;
+    if (!agree) agree = p.slice();
+    else for (let k = 0; k < N; k++) if (agree[k] !== p[k]) agree[k] = EMPTY;
+  }
+  if (!agree) return null;
+  const moves = new Map();
+  L.cells.forEach((i, k) => { if (g[i] === EMPTY && agree[k] !== EMPTY) moves.set(i, agree[k]); });
+  return { moves, ways };
+}
+
+// Applies line reasoning everywhere until nothing changes. Returns the grid, or null on a contradiction.
+function lineSolve(givens, signs) {
+  const g = givens.slice();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const L of LINES) {
+      const r = lineMoves(L, g, signs);
+      if (!r) return null;
+      r.moves.forEach((v, i) => { g[i] = v; changed = true; });
+    }
+  }
+  return g;
+}
+
+// 3 · Lookahead: "if this cell were an orange, some row or column would break several moves later,
+//     so it's a blueberry". Only Extreme puzzles need it; every other level is finished without it.
+function lookaheadMove(g, signs) {
+  for (let i = 0; i < N * N; i++) {
+    if (g[i] !== EMPTY) continue;
+    for (const v of [ORANGE, BERRY]) {
+      const trial = g.slice();
+      trial[i] = v;
+      if (lineSolve(trial, signs) === null) return { i, v: other(v) };
+    }
+  }
+  return null;
+}
+
+// True when techniques 1 to `technique` are enough to finish the puzzle:
+// 1 basic moves, 2 adds line reasoning, 3 adds lookahead.
+function solvesWith(givens, signs, technique) {
+  if (technique === 1) {
+    const g = givens.slice();
+    for (let m = basicMoves(g, signs); m.size; m = basicMoves(g, signs)) m.forEach((v, i) => { g[i] = v; });
+    return !g.includes(EMPTY);
+  }
+  let g = lineSolve(givens, signs);
+  while (technique >= 3 && g && g.includes(EMPTY)) {
+    const m = lookaheadMove(g, signs);
+    if (!m) return false;
+    g[m.i] = m.v;
+    g = lineSolve(g, signs);
+  }
+  return !!g && !g.includes(EMPTY);
+}
+
+// Plays the puzzle like a person who always reaches for the easiest technique that works, and counts:
+//   narrow    — moments when only one basic move is open on the whole board, so the player has to hunt for it
+//   line      — times they run out of basic moves and have to think a row or column through
+//   lookahead — times even that isn't enough and they have to try a fruit and follow it several moves ahead
+// Returns null when even lookahead can't finish it.
+function grade(givens, signs) {
+  const g = givens.slice();
+  const effort = { narrow: 0, line: 0, lookahead: 0 };
+  while (g.includes(EMPTY)) {
+    const basic = basicMoves(g, signs);
+    if (basic.size) { if (basic.size === 1) effort.narrow++; basic.forEach((v, i) => { g[i] = v; }); continue; }
+    // The line with the fewest ways left to finish is the one a person would think through first.
+    let best = null;
+    for (const L of LINES) {
+      const r = lineMoves(L, g, signs);
+      if (r && r.moves.size && (!best || r.ways < best.ways)) best = r;
+    }
+    if (best) { best.moves.forEach((v, i) => { g[i] = v; }); effort.line++; continue; }
+    const m = lookaheadMove(g, signs);
+    if (!m) return null;
+    g[m.i] = m.v;
+    effort.lookahead++;
+  }
+  return effort;
+}
+
+// technique: the hardest technique the puzzle may need (1 basic, 2 line reasoning, 3 lookahead).
+// line: how many times the player has to stop and think a row or column through.
+// narrow: the most moments with a single basic move open.
+const DIFFICULTIES = {
+  easy: { label: 'Easy', technique: 1, narrow: 1,
+    note: 'Every move can be spotted at a glance.' },
+  medium: { label: 'Medium', technique: 2, line: [1, 3], narrow: 3,
+    note: 'Now and then you’ll need to think a whole row or column through.' },
+  hard: { label: 'Hard', technique: 2, line: [4, 5],
+    note: 'Fewer clues, and several times you’ll need to think a whole row or column through.' },
+  veryhard: { label: 'Very hard', technique: 2, line: [6, 99],
+    note: 'The fewest clues. Again and again, the next move hides in one row or column.' },
+  extreme: { label: 'Extreme', technique: 3,
+    note: 'At least once, rows and columns won’t be enough and you’ll have to follow a fruit several moves ahead.' },
+};
+
+// One try at a puzzle with exactly one solution for the chosen level: add random clues from a hidden
+// solution until the allowed techniques can finish it, take away every clue it can do without, then
+// grade it the way a person would play it. Returns the puzzle, or null if it lands outside the level.
+// Every random choice comes from `rng`, so repeating the tries with the same seed repeats the puzzle.
+const MAX_CLUES = 24;   // past this the board looks crowded and the puzzle plays itself
+function tryPuzzle(difficulty, rng) {
+  const level = DIFFICULTIES[difficulty] || DIFFICULTIES.medium;
+  const solution = randomSolution(rng);
+  const givens = new Array(N * N).fill(EMPTY);
+  const signs = new Array(EDGES.length).fill(NONE);
+  const set = (clue, on) => {
+    if (clue.cell !== undefined) givens[clue.cell] = on ? solution[clue.cell] : EMPTY;
+    else {
+      const e = EDGES[clue.edge];
+      signs[clue.edge] = on ? (solution[e.a] === solution[e.b] ? SAME : DIFF) : NONE;
+    }
+  };
+  const shown = clue => (clue.cell !== undefined ? givens[clue.cell] !== EMPTY : signs[clue.edge] !== NONE);
+  const clues = shuffle([...givens.map((_, cell) => ({ cell })), ...EDGES.map((_, edge) => ({ edge }))], rng);
+  const trim = t => {
+    for (const clue of shuffle(clues.filter(shown), rng)) { set(clue, false); if (!solvesWith(givens, signs, t)) set(clue, true); }
+  };
+
+  // Lookahead is slow to check, so an Extreme puzzle starts as a line-reasoning one and is trimmed further.
+  const start = Math.min(level.technique, 2);
+  for (const clue of clues) { set(clue, true); if (solvesWith(givens, signs, start)) break; }
+  trim(start);
+  if (level.technique === 3) trim(3);
+
+  let effort = grade(givens, signs);
+  if (!effort) return null;
+  const tooHard = e => (level.line && e.line > level.line[1]) || (level.narrow !== undefined && e.narrow > level.narrow);
+  // Harder than this level allows: give clues back one at a time until it eases into range.
+  for (const clue of clues) {
+    if (!tooHard(effort)) break;
+    if (!shown(clue)) { set(clue, true); effort = grade(givens, signs); }
+  }
+
+  if (tooHard(effort) || (level.line && effort.line < level.line[0])) return null;
+  if (clues.filter(shown).length > MAX_CLUES) return null;
+  // Extreme must need lookahead at least once; no other level may need it at all.
+  if ((level.technique === 3) !== (effort.lookahead > 0)) return null;
+  return { solution, givens, signs, difficulty, effort };
+}
+
+// Tries until a puzzle lands in the seed's level. A generator, so the page can pause between tries
+// and keep drawing; every pause reports how many tries it has made so far.
+function* puzzleFromSeed(seed) {
+  const { difficulty } = parseSeed(seed);
+  const rng = seededRandom(seed);
+  for (let tries = 1; ; tries++) {
+    const puzzle = tryPuzzle(difficulty, rng);
+    if (puzzle) return { ...puzzle, seed };
+    yield tries;
+  }
+}
+
+// Cells and signs that break a rule in the current grid.
+function findErrors(g, signs) {
+  const cells = new Set(), edges = new Set();
+  for (const L of LINES) {
+    for (const v of [ORANGE, BERRY]) {
+      const same = L.cells.filter(i => g[i] === v);
+      if (same.length > N / 2) same.forEach(i => cells.add(i));
+    }
+    for (let k = 0; k + 2 < N; k++) {
+      const [a, b, c] = [L.cells[k], L.cells[k + 1], L.cells[k + 2]];
+      if (g[a] !== EMPTY && g[a] === g[b] && g[b] === g[c]) { cells.add(a); cells.add(b); cells.add(c); }
+    }
+  }
+  EDGES.forEach((e, k) => {
+    const s = signs[k];
+    if (s === NONE || g[e.a] === EMPTY || g[e.b] === EMPTY) return;
+    if ((s === SAME) !== (g[e.a] === g[e.b])) { edges.add(k); cells.add(e.a); cells.add(e.b); }
+  });
+  return { cells, edges };
+}
+
+const isSolved = (g, signs) => !g.includes(EMPTY) && findErrors(g, signs).cells.size === 0;
+
+/* ---------- Game UI ---------- */
+
+if (typeof document !== 'undefined') {
+  const $ = id => document.getElementById(id);
+  const boardEl = $('board'), signsEl = $('signs'), winEl = $('win'), loadingEl = $('loading');
+  const timerEl = $('timer'), winTimeEl = $('win-time');
+  const undoBtn = $('undo'), clearBtn = $('clear');
+
+  const FRUIT = {
+    [ORANGE]: '<svg viewBox="0 0 100 100" aria-hidden="true"><use href="#fruit-orange"/></svg>',
+    [BERRY]: '<svg viewBox="0 0 100 100" aria-hidden="true"><use href="#fruit-berry"/></svg>',
+  };
+  const NAME = { [EMPTY]: 'empty', [ORANGE]: 'orange', [BERRY]: 'blueberry' };
+
+  let puzzle = null, grid = new Array(N * N).fill(EMPTY), history = [], signEls = new Map(), won = false, errTimer;
+  let loading = false;   // true while a new puzzle is being made; the board ignores input until it's ready
+  let focusIdx = 0;
+
+  // The clock only runs while the page is on screen, so locking the phone or switching apps pauses it.
+  let elapsedMs = 0, runningSince = null;
+  const elapsed = () => elapsedMs + (runningSince === null ? 0 : Date.now() - runningSince);
+  function pauseClock() { elapsedMs = elapsed(); runningSince = null; }
+  function resumeClock() { if (runningSince === null && !won && !loading && !document.hidden) runningSince = Date.now(); }
+
+  // Progress is kept in this browser, so a phone that reloads the tab in the background doesn't lose the game.
+  const SAVE_KEY = 'orchard:game:v1';
+  function save() {
+    if (!puzzle || loading) return;
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ puzzle, grid, history: history.slice(-200), elapsed: elapsed(), won }));
+    } catch { /* storage blocked: the game still works, it just won't survive a reload */ }
+  }
+  function loadSaved() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+      const sized = (a, n) => Array.isArray(a) && a.length === n;
+      const intact = s && !s.won && s.puzzle && sized(s.puzzle.givens, N * N) && sized(s.puzzle.signs, EDGES.length) && sized(s.grid, N * N);
+      // Every board shows its seed, so a game saved before seeds existed is replaced. So is one that
+      // its level's techniques can't solve (an older version made some that needed lookahead outside Extreme).
+      const seeded = intact && parseSeed(s.puzzle.seed || '');
+      const level = seeded && DIFFICULTIES[seeded.difficulty];
+      if (level && solvesWith(s.puzzle.givens, s.puzzle.signs, level.technique)) return s;
+    } catch { /* nothing usable saved */ }
+    return null;
+  }
+
+  const LEVEL_KEY = 'orchard:difficulty';
+  let difficulty = 'medium';
+  try { const d = localStorage.getItem(LEVEL_KEY); if (DIFFICULTIES[d]) difficulty = d; } catch { /* keep the default */ }
+  const levelInputs = [...document.querySelectorAll('input[name="level"]')];
+  function showDifficulty() {
+    levelInputs.forEach(input => { input.checked = input.value === difficulty; });
+    $('level-note').textContent = DIFFICULTIES[difficulty].note;
+  }
+
+  // The seed shows under the board, on the loading screen and on the win card the moment it's picked.
+  // Entering another in the "Play a seed" modal makes that exact puzzle.
+  const seedValue = $('seed-value'), seedCopy = $('seed-copy');
+  const seedInput = $('seed-input'), seedPlay = $('seed-play'), seedMsg = $('seed-msg');
+  let currentSeed = '';
+  function showSeed(seed) {
+    currentSeed = seed;
+    seedValue.textContent = seed;
+    seedCopy.setAttribute('aria-label', `Copy seed ${seed}`);
+    $('loading-seed').textContent = `Seed ${seed}`;
+    $('win-seed').textContent = `Seed ${seed}`;
+    updateSeedForm();
+  }
+  function updateSeedForm() {
+    const text = seedInput.value.trim();
+    const parsed = text ? parseSeed(text) : null;
+    const same = !!parsed && parsed.seed === currentSeed;
+    const bad = !!text && !parsed;
+    seedPlay.disabled = !parsed || same;
+    seedInput.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    seedMsg.classList.toggle('err', bad);
+    seedMsg.textContent = bad ? 'Seeds look like HARD-7KQ2-9XWM: a level, then 8 letters and digits.'
+      : same ? 'That’s the puzzle you’re playing now.'
+      : parsed ? `Press Play to start this ${DIFFICULTIES[parsed.difficulty].label} puzzle.`
+      : 'Paste a seed someone shared to play the same starting board.';
+  }
+
+  const cellEls = Array.from({ length: N * N }, (_, i) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'cell';
+    el.dataset.i = i;
+    el.style.setProperty('--d', Math.floor(i / N) + (i % N));
+    el.tabIndex = i === 0 ? 0 : -1;
+    boardEl.appendChild(el);
+    return el;
+  });
+
+  // Puts a puzzle on the board: a fresh one ({ puzzle }) or a saved game with its moves and time.
+  function startGame(state) {
+    puzzle = state.puzzle;
+    if (!DIFFICULTIES[puzzle.difficulty]) puzzle.difficulty = difficulty;
+    difficulty = puzzle.difficulty;
+    showDifficulty();
+    showSeed(puzzle.seed);
+    grid = state.grid || puzzle.givens.slice();
+    history = Array.isArray(state.history) ? state.history : [];
+    won = false;
+    elapsedMs = Number(state.elapsed) || 0;
+    runningSince = null;
+    resumeClock();
+    clearTimeout(errTimer);
+    boardEl.classList.remove('won');
+    winEl.hidden = true;
+
+    signsEl.textContent = '';
+    signEls = new Map();
+    puzzle.signs.forEach((s, k) => {
+      if (s === NONE) return;
+      const e = EDGES[k];
+      const el = document.createElement('div');
+      el.className = 'sign';
+      el.style.left = (e.dir === 'h' ? (e.c + 1) / N : (e.c + 0.5) / N) * 100 + '%';
+      el.style.top = (e.dir === 'h' ? (e.r + 0.5) / N : (e.r + 1) / N) * 100 + '%';
+      el.innerHTML = `<svg viewBox="0 0 20 20"><use href="#${s === SAME ? 'sign-same' : 'sign-diff'}"/></svg>`;
+      signsEl.appendChild(el);
+      signEls.set(k, el);
+    });
+
+    cellEls.forEach(el => { el.classList.remove('err', 'pop'); delete el.dataset.v; });
+    tick();
+    render();
+    if (state.grid) refreshErrors();
+    save();
+  }
+
+  // Puzzles are made a few tries at a time, handing control back to the browser in between, so the page
+  // keeps drawing and the loading screen stays live however many tries a level takes.
+  const nextTask = () => new Promise(resolve => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => resolve();
+    channel.port2.postMessage(null);
+  });
+  let request = 0;   // a newer request (another level, New puzzle again, a pasted seed) makes the older one stop
+  async function newGame(seed = newSeed(difficulty)) {
+    const mine = ++request;
+    const parsed = parseSeed(seed);
+    seed = parsed.seed;
+    difficulty = parsed.difficulty;   // a pasted seed brings its own level
+    try { localStorage.setItem(LEVEL_KEY, difficulty); } catch { /* not remembered next visit, still applies now */ }
+    showDifficulty();
+    showSeed(seed);
+    loading = true;
+    elapsedMs = 0;
+    runningSince = null;
+    timerEl.textContent = fmt(0);
+    try { localStorage.removeItem(SAVE_KEY); } catch { /* nothing to remove */ }
+    clearTimeout(errTimer);
+    winEl.hidden = true;
+    boardEl.classList.remove('won');
+    undoBtn.disabled = clearBtn.disabled = true;
+    $('loading-title').textContent = `Making your ${DIFFICULTIES[difficulty].label} puzzle…`;
+    $('loading-tries').textContent = '';
+    loadingEl.hidden = false;
+
+    const making = puzzleFromSeed(seed);
+    let step = making.next();
+    while (!step.done) {
+      const sliceEnds = performance.now() + 12;
+      while (!step.done && performance.now() < sliceEnds) step = making.next();
+      if (!step.done) $('loading-tries').textContent = `Tried ${step.value} candidate puzzles`;
+      await nextTask();
+      if (mine !== request) return;
+    }
+    loading = false;
+    loadingEl.hidden = true;
+    startGame({ puzzle: step.value });
+  }
+
+  function render(popped = []) {
+    cellEls.forEach((el, i) => {
+      const v = grid[i];
+      const given = puzzle.givens[i] !== EMPTY;
+      el.classList.toggle('given', given);
+      el.setAttribute('aria-disabled', given ? 'true' : 'false');
+      if (el.dataset.v !== String(v)) {
+        el.innerHTML = FRUIT[v] || '';
+        el.dataset.v = v;
+      }
+      const r = Math.floor(i / N) + 1, c = (i % N) + 1;
+      el.setAttribute('aria-label', `Row ${r}, column ${c}: ${NAME[v]}${given ? ', fixed' : ''}`);
+    });
+    popped.forEach(i => {
+      const el = cellEls[i];
+      if (grid[i] === EMPTY) return;
+      el.classList.remove('pop');
+      void el.offsetWidth;
+      el.classList.add('pop');
+    });
+    undoBtn.disabled = loading || won || history.length === 0;
+    clearBtn.disabled = loading || won || grid.every((v, i) => v === puzzle.givens[i]);
+  }
+
+  // Resolved errors clear at once; new ones show after a short pause so cycling through a cell doesn't flash red.
+  function refreshErrors() {
+    const now = findErrors(grid, puzzle.signs);
+    cellEls.forEach((el, i) => { if (!now.cells.has(i)) el.classList.remove('err'); });
+    signEls.forEach((el, k) => { if (!now.edges.has(k)) el.classList.remove('err'); });
+    clearTimeout(errTimer);
+    errTimer = setTimeout(() => {
+      const later = findErrors(grid, puzzle.signs);
+      cellEls.forEach((el, i) => el.classList.toggle('err', later.cells.has(i)));
+      signEls.forEach((el, k) => el.classList.toggle('err', later.edges.has(k)));
+    }, 550);
+  }
+
+  function changed(popped) {
+    render(popped);
+    refreshErrors();
+    if (isSolved(grid, puzzle.signs)) win();
+    save();
+  }
+
+  function setCell(i, v) {
+    if (loading || !puzzle || won || puzzle.givens[i] !== EMPTY || grid[i] === v) return;
+    history.push(grid.slice());
+    grid[i] = v;
+    changed([i]);
+  }
+
+  function undo() {
+    if (loading || won || !history.length) return;
+    const before = grid;
+    grid = history.pop();
+    changed(grid.map((v, i) => (v !== before[i] ? i : -1)).filter(i => i >= 0));
+  }
+
+  function clearBoard() {
+    if (loading || won || grid.every((v, i) => v === puzzle.givens[i])) return;
+    history.push(grid.slice());
+    grid = puzzle.givens.slice();
+    changed([]);
+  }
+
+  const fmt = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  function tick() { if (!won) timerEl.textContent = fmt(elapsed()); }
+  setInterval(tick, 500);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { pauseClock(); save(); } else resumeClock();
+    tick();
+  });
+  window.addEventListener('pagehide', save);
+
+  function win() {
+    pauseClock();
+    won = true;
+    clearTimeout(errTimer);
+    const time = fmt(elapsedMs);
+    timerEl.textContent = time;
+    winTimeEl.textContent = `${DIFFICULTIES[difficulty].label} · ${time}`;
+    boardEl.classList.add('won');
+    winEl.hidden = false;
+    render();
+    setTimeout(() => $('again').focus({ preventScroll: true }), 800);
+  }
+
+  function focusCell(i) {
+    cellEls[focusIdx].tabIndex = -1;
+    focusIdx = i;
+    cellEls[i].tabIndex = 0;
+    cellEls[i].focus();
+  }
+
+  boardEl.addEventListener('click', ev => {
+    const el = ev.target.closest('.cell');
+    if (!el) return;
+    const i = Number(el.dataset.i);
+    if (i !== focusIdx) { cellEls[focusIdx].tabIndex = -1; focusIdx = i; el.tabIndex = 0; }
+    setCell(i, (grid[i] + 1) % 3);   // empty -> orange -> blueberry -> empty
+  });
+
+  boardEl.addEventListener('focusin', ev => {
+    const el = ev.target.closest('.cell');
+    if (el && Number(el.dataset.i) !== focusIdx) { cellEls[focusIdx].tabIndex = -1; focusIdx = Number(el.dataset.i); el.tabIndex = 0; }
+  });
+
+  boardEl.addEventListener('keydown', ev => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const r = Math.floor(focusIdx / N), c = focusIdx % N;
+    const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (moves[ev.key]) {
+      const [dr, dc] = moves[ev.key];
+      const nr = Math.min(N - 1, Math.max(0, r + dr)), nc = Math.min(N - 1, Math.max(0, c + dc));
+      focusCell(nr * N + nc);
+      ev.preventDefault();
+      return;
+    }
+    const key = ev.key.toLowerCase();
+    const value = { o: ORANGE, 1: ORANGE, b: BERRY, 2: BERRY, backspace: EMPTY, delete: EMPTY, 0: EMPTY }[key];
+    if (value !== undefined) { setCell(focusIdx, value); ev.preventDefault(); }
+  });
+
+  // Modals (How to play from the ? button, Play a seed from Enter seed). Escape, a close button
+  // or a tap on the dimmed backdrop closes them.
+  function openModal(el) {
+    if (el.showModal) el.showModal();
+    else el.setAttribute('open', '');   // very old browsers: shown, just not modal
+  }
+  function closeModal(el) { if (el.close) el.close(); else el.removeAttribute('open'); }
+  for (const el of document.querySelectorAll('dialog.modal')) {
+    el.addEventListener('click', ev => { if (ev.target === el || ev.target.closest('[data-close]')) closeModal(el); });
+  }
+  $('help-open').addEventListener('click', () => openModal($('help')));
+  $('seed-open').addEventListener('click', () => {
+    seedInput.value = '';
+    updateSeedForm();
+    openModal($('seed-dialog'));
+    seedInput.focus();
+  });
+  // The level descriptions, which phones don't show under the picker, also live in How to play.
+  $('level-list').innerHTML = Object.values(DIFFICULTIES).map(l => `<dt>${l.label}</dt><dd>${l.note}</dd>`).join('');
+  $('levels-more').open = matchMedia('(min-height: 720px)').matches;   // starts folded where the modal would otherwise scroll
+
+  document.addEventListener('keydown', ev => {
+    if (document.querySelector('dialog[open]')) return;   // keys belong to the open modal
+    if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && ev.key.toLowerCase() === 'z') { undo(); ev.preventDefault(); }
+  });
+
+  levelInputs.forEach(input => input.addEventListener('change', () => {
+    difficulty = input.value;
+    newGame();
+  }));
+
+  seedInput.addEventListener('input', updateSeedForm);
+  $('seed-form').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const parsed = parseSeed(seedInput.value);
+    if (!parsed || parsed.seed === currentSeed) return;
+    seedInput.value = '';
+    closeModal($('seed-dialog'));
+    newGame(parsed.seed);
+  });
+
+  const toastEl = $('toast');
+  let toastTimer;
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2200);
+  }
+  // Where the clipboard API is refused, the older copy command usually still works.
+  function copyWithCommand(text) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.readOnly = true;
+    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+    document.body.append(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* not supported */ }
+    area.remove();
+    return ok;
+  }
+  seedCopy.addEventListener('click', async () => {
+    let copied;
+    try { await navigator.clipboard.writeText(currentSeed); copied = true; } catch { copied = copyWithCommand(currentSeed); }
+    seedCopy.focus({ preventScroll: true });
+    const shown = currentSeed.replace(/-/g, '‑');   // non-breaking dashes keep the seed on one line
+    toast(copied ? `Copied ${shown}` : `This browser won’t copy. Your seed is ${shown}`);
+  });
+
+  undoBtn.addEventListener('click', undo);
+  clearBtn.addEventListener('click', clearBoard);
+  $('new').addEventListener('click', () => newGame());
+  $('again').addEventListener('click', () => { newGame(); cellEls[focusIdx].focus({ preventScroll: true }); });
+
+  if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) $('undo-key').textContent = '⌘ Z';
+
+  const saved = loadSaved();
+  if (saved) startGame(saved);
+  else newGame();
+}
+</script>
+</body>
+</html>
